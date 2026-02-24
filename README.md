@@ -33,7 +33,7 @@ FoodDash allows users to:
 2. **Add items** to a persistent cart with quantity controls
 3. **Checkout** with delivery details (name, address, phone) — validated on both client and server
 4. **Track orders in real-time** via Socket.io — status auto-advances every N seconds (configurable via env)
-5. **View order history** with live status badges
+5. **View order history** filtered by phone number with live status badges
 
 ---
 
@@ -54,18 +54,19 @@ FoodDash allows users to:
 ┌─────────────────────────────────────────────────────┐
 │               Express API Server (Node.js)          │
 │                                                     │
-│  Route → Controller → Service → Store (in-memory)  │
+│  Route → Controller → Service → MongoDB (Mongoose)  │
 │  Validation: Zod schemas                           │
 │  Rate Limiting: rate-limiter-flexible              │
 │  Real-time: Socket.io + Redis adapter              │
 └───────────────────────────┬─────────────────────────┘
                             │
-                            ▼
-                  ┌─────────────────┐
-                  │   Redis          │
-                  │ • Socket.io pub/sub adapter │
-                  │ • Menu cache (60s TTL)       │
-                  └─────────────────┘
+              ┌─────────────┴──────────────┐
+              ▼                            ▼
+    ┌─────────────────┐         ┌─────────────────────┐
+    │    MongoDB       │         │       Redis          │
+    │ • Orders         │         │ • Socket.io adapter  │
+    │ • Menu items     │         │ • Menu cache (60s)   │
+    └─────────────────┘         └─────────────────────┘
 ```
 
 ### Layered Backend Architecture
@@ -76,7 +77,7 @@ Request
         └── Validate middleware (Zod)
               └── Controller (HTTP layer only)
                     └── Service (business logic, validation)
-                          └── Store (in-memory Map — swappable)
+                          └── Model (Mongoose — MongoDB)
 ```
 
 ---
@@ -92,11 +93,11 @@ Request
 | HTTP client | Axios | Interceptors, consistent error shape |
 | Real-time | Socket.io client | Room-based subscriptions, auto-reconnect |
 | Backend | Express.js (Node.js) | Minimal, composable, wide ecosystem |
+| Database | MongoDB + Mongoose | Persistent storage, rich query API, schema validation |
 | Validation | Zod | Type-safe schemas, excellent error messages |
 | Real-time server | Socket.io + Redis adapter | Scales horizontally across multiple server instances |
 | Caching | Redis (ioredis) | 60s TTL on menu, invalidated on writes |
 | Rate limiting | rate-limiter-flexible | Redis-backed, memory fallback |
-| ID generation | nanoid v3 | URL-safe, collision-resistant |
 | Testing | Jest + Supertest + React Testing Library | TDD across both layers |
 | Monorepo | npm workspaces | Single `npm install`, shared scripts |
 
@@ -125,15 +126,19 @@ orderManagement-ms/
 └── server/                   # Express API server
     ├── src/
     │   ├── app.js            # Express app (importable without starting HTTP)
-    │   ├── index.js          # HTTP server + Socket.io + seeding (entry point)
-    │   ├── config/           # Redis client with graceful fallback
+    │   ├── index.js          # HTTP server + Socket.io + DB connect + seeding (entry point)
+    │   ├── config/
+    │   │   ├── db.js         # connectDB / disconnectDB (Mongoose)
+    │   │   └── redis.js      # Redis client with graceful fallback
     │   ├── controllers/      # Thin HTTP handlers
-    │   ├── middleware/        # validate (Zod), errorHandler, rateLimiter
+    │   ├── middleware/       # validate (Zod), errorHandler, rateLimiter
+    │   ├── models/
+    │   │   ├── MenuItem.js   # Mongoose schema + id virtual
+    │   │   └── Order.js      # Mongoose schema + STATUS_TRANSITIONS + ORDER_STATUSES
     │   ├── routes/           # menuRoutes, orderRoutes
     │   ├── seed/             # 12 menu items across 8 categories
     │   ├── services/         # Business logic + orderStatusSimulator
     │   ├── socket/           # orderSocket (room-per-order pattern)
-    │   ├── store/            # In-memory Map stores (Repository pattern)
     │   ├── utils/            # generateId (nanoid)
     │   └── validators/       # Zod schemas for menu and orders
     └── __tests__/            # API + Socket.io tests (34 tests)
@@ -144,20 +149,27 @@ orderManagement-ms/
 ## Key Design Decisions
 
 ### 1. `app.js` separated from `index.js`
-Express app is exported from `app.js` with no side effects. `index.js` creates the HTTP server, attaches Socket.io, and seeds data. This makes Supertest-based integration tests clean — they import `app` directly without starting a server.
+Express app is exported from `app.js` with no side effects. `index.js` creates the HTTP server, attaches Socket.io, connects to MongoDB, and seeds data. This makes Supertest-based integration tests clean — they import `app` directly without starting a server.
 
-### 2. Repository Pattern (Stores)
-`menuStore` and `orderStore` are Map-based classes with a consistent interface (`getAll`, `getById`, `create`, `update`, `delete`). Swapping to MongoDB/PostgreSQL requires only changing the store implementation — nothing above it changes.
+### 2. MongoDB + Mongoose (replacing in-memory stores)
+
+`MenuItem` and `Order` are Mongoose models with schemas, validation, and an `id` virtual (maps `_id` to `id`, removes `__v` via `toJSON` transform). Using MongoDB provides persistent storage across restarts and enables queries like filtering orders by phone number.
+
+```js
+// id virtual applied to all models
+schema.virtual('id').get(function () { return this._id.toString(); });
+schema.set('toJSON', { virtuals: true, transform: (_, ret) => { delete ret._id; delete ret.__v; } });
+```
 
 ### 3. Status Transition Enforcement
-A `STATUS_TRANSITIONS` map in `orderStore` defines valid next states. The service layer rejects any transition that isn't explicitly allowed — no skipping steps, no going backward.
+A `STATUS_TRANSITIONS` map in `Order.js` defines valid next states. The service layer rejects any transition that isn't explicitly allowed — no skipping steps, no going backward.
 
 ```js
 received → preparing → out_for_delivery → delivered
 ```
 
 ### 4. Server-Side Total Calculation
-`totalAmount` is always computed on the server by summing `price × quantity` from menu items. The client-submitted price is used for display only — it's never trusted for the total.
+`totalAmount` is always computed on the server by summing `price × quantity` from menu items fetched from MongoDB. The client-submitted price is used for display only — it's never trusted for the total.
 
 ### 5. Real-Time: Room-Per-Order
 Each order gets its own Socket.io room (`order:${orderId}`). Clients subscribe only to the room they care about. Status updates are emitted only to that room — efficient at any scale.
@@ -200,6 +212,7 @@ Both Redis caching (menu) and rate limiting fall back to in-memory equivalents w
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/orders` | List all orders — `200 { orders: [] }` when empty |
+| `GET` | `/api/orders?phone=<phone>` | Filter orders by customer phone number |
 | `GET` | `/api/orders/:id` | Get single order — `404` if not found |
 | `POST` | `/api/orders` | Place order (validates items exist, calculates total server-side) |
 | `PATCH` | `/api/orders/:id/status` | Advance status (enforces transition rules) |
@@ -248,6 +261,7 @@ All errors follow a consistent envelope:
 
 ### Prerequisites
 - Node.js ≥ 18
+- MongoDB running on `localhost:27017` (or a MongoDB Atlas URI)
 - Redis running on `localhost:6379` (optional — app works without it)
 
 ### Setup
@@ -262,7 +276,7 @@ npm install          # installs both client and server workspaces
 
 ```bash
 cp server/.env.example server/.env
-# Edit server/.env — set STATUS_UPDATE_INTERVAL_MS=5000 to enable simulation
+# Edit server/.env — set MONGODB_URI and STATUS_UPDATE_INTERVAL_MS
 ```
 
 ### Start
@@ -290,7 +304,8 @@ npm run dev --workspace=client     # Frontend only
 |----------|---------|-------------|
 | `PORT` | `3001` | HTTP server port |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed client origin |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
+| `MONGODB_URI` | `mongodb://localhost:27017/orderManagement` | MongoDB connection string |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL (optional) |
 | `STATUS_UPDATE_INTERVAL_MS` | `0` (disabled) | Auto-advance order status every N ms. Set to `5000` for 5s intervals. `0` = disabled. |
 
 ### Client (`client/.env`)
@@ -326,7 +341,7 @@ npm run test:client               # client tests only
 
 ### TDD Approach
 
-Tests were written **before** implementation for all API endpoints. The test file structure follows **AAA (Arrange-Act-Assert)**. Server tests use Supertest against the real Express app (with in-memory store) — no mocking of business logic.
+Tests were written **before** implementation for all API endpoints. The test file structure follows **AAA (Arrange-Act-Assert)**. Server tests use `mongodb-memory-server` to spin up an in-process MongoDB instance — no mocking of business logic, no shared state between tests.
 
 ---
 
@@ -335,8 +350,8 @@ Tests were written **before** implementation for all API endpoints. The test fil
 > **Important constraint:** The backend **cannot** be deployed to Vercel or any serverless platform.
 > Two reasons:
 >
-> 1. **In-memory store** — serverless functions are stateless and ephemeral; each invocation may be a fresh process, so all stored orders/menu data would be lost between requests.
-> 2. **Socket.io** — requires a persistent, long-lived TCP connection. Serverless functions terminate immediately after returning a response; WebSocket upgrades are not supported.
+> 1. **Socket.io** — requires a persistent, long-lived TCP connection. Serverless functions terminate immediately after returning a response; WebSocket upgrades are not supported.
+> 2. **Status simulator** — runs `setTimeout` chains in the background; serverless functions have no persistent process to run them.
 >
 > The split is: **frontend → Vercel** (static files only), **backend → Railway/Render/Fly.io** (persistent Node.js process).
 
@@ -351,19 +366,20 @@ Tests were written **before** implementation for all API endpoints. The test fil
 
 ### Backend → Railway
 
-Railway runs a **persistent Node.js process** — in-memory state and Socket.io both work correctly.
+Railway runs a **persistent Node.js process** — MongoDB, Socket.io, and the status simulator all work correctly.
 
 1. Connect the GitHub repo to Railway
 2. Set root directory to `server/`
 3. Add environment variables:
    - `CORS_ORIGIN` = your Vercel frontend URL
-   - `REDIS_URL` = provisioned Redis URL (Railway Redis addon)
+   - `MONGODB_URI` = provisioned MongoDB URL (Railway MongoDB addon or MongoDB Atlas)
+   - `REDIS_URL` = provisioned Redis URL (Railway Redis addon — optional)
    - `STATUS_UPDATE_INTERVAL_MS` = `5000` (or your preferred interval)
 4. `Procfile` is pre-configured: `web: node src/index.js`
 
-### Redis → Railway Redis addon
+### MongoDB → Railway MongoDB addon or Atlas
 
-Provision via Railway dashboard → New Service → Redis. Copy the `REDIS_URL` into the server service's environment variables.
+Provision via Railway dashboard → New Service → MongoDB, or use a free [MongoDB Atlas](https://www.mongodb.com/atlas) cluster. Copy the connection string as `MONGODB_URI`.
 
 ### Alternatives to Railway
 
@@ -381,13 +397,13 @@ Provision via Railway dashboard → New Service → Redis. Copy the `REDIS_URL` 
 
 ### 1. Problem-Solving Approach
 
-- Requirements decomposed into 12 phases: scaffolding → middleware → menu API → order API → sockets → frontend components → pages → testing → polish → deployment
-- Scalability addressed via: Socket.io Redis adapter (horizontal scaling), Redis caching (menu read throughput), rate limiting (abuse prevention), and swappable Repository pattern (in-memory → DB, zero upstream changes)
+- Requirements decomposed into phases: scaffolding → middleware → menu API → order API → sockets → MongoDB integration → frontend → testing → polish → deployment
+- Scalability addressed via: MongoDB (persistent, queryable data store), Socket.io Redis adapter (horizontal scaling), Redis caching (menu read throughput), rate limiting (abuse prevention)
 - Each feature built independently and tested before the next begins
 
 ### 2. Code Quality
 
-- **Layered architecture**: Route → Controller → Service → Store (each layer has one responsibility)
+- **Layered architecture**: Route → Controller → Service → Model (each layer has one responsibility)
 - **69 tests** passing across server and client
 - TDD: tests written before implementation for all API endpoints
 - Zod schemas shared between validation middleware and type inference
@@ -404,17 +420,19 @@ Provision via Railway dashboard → New Service → Redis. Copy the `REDIS_URL` 
 - Live order tracker with 4-step progress indicator
 - All-steps-completed state when delivered (no false "in progress" state)
 - Customer info persisted to localStorage, shown as a pill on cart page
+- Order history page filtered by phone number
 - Fully responsive (1–4 column grid)
 
 ### 4. Back-End
 
 - **Input validation**: Zod schemas on all write endpoints — rejects before reaching service layer
 - **Status transitions**: Hard-enforced map — no skipping, no backward transitions
-- **Server-side total**: `totalAmount` always recomputed; client price is display-only
+- **Server-side total**: `totalAmount` always recomputed from MongoDB menu items; client price is display-only
 - **Structured error responses**: Consistent `{ error: { code, message, details } }` envelope
 - **Rate limiting**: 10 req/s per IP (Redis-backed with memory fallback)
 - **Health endpoint**: `/health` for platform health checks
-- **404 vs 200**: List endpoints always return `200 { items/orders: [] }`; `404` reserved for missing single entities
+- **404 vs 200**: List endpoints always return `200` with empty array; `404` reserved for missing single entities
+- **Phone-based order lookup**: `GET /api/orders?phone=<phone>` returns orders belonging to a specific customer
 
 ### 5. Use of AI
 
@@ -427,12 +445,13 @@ See [AI Usage](#ai-usage) section below.
 Claude Code (Claude Sonnet 4.6) was used as a **pair-programming collaborator** throughout this project. Specific contributions:
 
 **Architecture Planning**
-- Helped design the layered backend (Route → Controller → Service → Store) and articulate why `app.js` / `index.js` separation enables clean testing
+- Helped design the layered backend (Route → Controller → Service → Model) and articulate why `app.js` / `index.js` separation enables clean testing
 - Recommended the Room-per-order Socket.io pattern over broadcasting to all clients
 - Suggested the Redis graceful fallback strategy (app works with or without Redis)
+- Guided MongoDB/Mongoose migration from in-memory stores (schema design, `id` virtual, `toJSON` transform)
 
 **Code Generation**
-- Generated boilerplate for all layers (stores, validators, services, controllers, routes) following the established pattern
+- Generated boilerplate for all layers (models, validators, services, controllers, routes) following the established pattern
 - Scaffolded all React components and hooks from architecture decisions
 - Generated deployment configs (`vercel.json`, `Procfile`, `.env.example`)
 
@@ -444,11 +463,12 @@ Claude Code (Claude Sonnet 4.6) was used as a **pair-programming collaborator** 
 
 **Testing**
 - Wrote all 69 tests following TDD discipline (tests before implementation)
-- Helped debug the `delivered` status showing as "in progress" instead of "completed" in `OrderStatusTracker` (the `isFinalStatus` guard fix)
+- Configured `mongodb-memory-server` for isolated, deterministic server tests
+
 
 **Best Practices Enforcement**
 - Flagged that `totalAmount` must never be trusted from the client
-- Recommended `--runInBand` for Jest when tests share singleton stores
+- Recommended `--runInBand` for Jest when tests share a MongoDB connection
 - Pointed out that list endpoints should always return `200` with empty array, never `404`
 
 The AI was used to **accelerate implementation** while architectural and design decisions were made collaboratively. All generated code was reviewed, understood, and adapted to requirements before being committed.
