@@ -1,0 +1,88 @@
+const MENU_SEED_DATA = [
+  {
+    name: 'Margherita Pizza',
+    description: 'Classic pizza with fresh mozzarella, tomato sauce, and basil leaves on a thin crust',
+    price: 12.99,
+    image: '/images/margherita-pizza.jpg',
+    category: 'Pizza',
+  },
+  {
+    name: 'Pepperoni Pizza',
+    description: 'Loaded with spicy pepperoni, mozzarella cheese, and our signature tomato sauce',
+    price: 14.99,
+    image: '/images/pepperoni-pizza.jpg',
+    category: 'Pizza',
+  },
+  {
+    name: 'Classic Cheeseburger',
+    description: 'Juicy beef patty with cheddar cheese, lettuce, tomato, and our special sauce',
+    price: 10.99,
+    image: '/images/cheeseburger.jpg',
+    category: 'Burger',
+  },
+  {
+    name: 'BBQ Bacon Burger',
+    description: 'Smoky BBQ sauce, crispy bacon, onion rings, and melted cheddar on a brioche bun',
+    price: 13.49,
+    image: '/images/bbq-burger.jpg',
+    category: 'Burger',
+  },
+  {
+    name: 'Spaghetti Carbonara',
+    description: 'Traditional Italian pasta with pancetta, egg, parmesan cheese, and black pepper',
+    price: 11.99,
+    image: '/images/carbonara.jpg',
+    category: 'Pasta',
+  },
+  {
+    name: 'Penne Arrabbiata',
+    description: 'Penne pasta in a spicy tomato sauce with garlic, chili flakes, and fresh parsley',
+    price: 10.49,
+    image: '/images/arrabbiata.jpg',
+    category: 'Pasta',
+  },
+  {
+    name: 'Caesar Salad',
+    description: 'Crisp romaine lettuce, parmesan shavings, croutons, and creamy Caesar dressing',
+    price: 8.99,
+    image: '/images/caesar-salad.jpg',
+    category: 'Salad',
+  },
+  {
+    name: 'Garlic Bread',
+    description: 'Toasted artisan bread with garlic butter, herbs, and melted mozzarella cheese',
+    price: 5.99,
+    image: '/images/garlic-bread.jpg',
+    category: 'Appetizer',
+  },
+  {
+    name: 'Tiramisu',
+    description: 'Classic Italian dessert with layers of espresso-soaked ladyfingers and mascarpone cream',
+    price: 7.99,
+    image: '/images/tiramisu.jpg',
+    category: 'Dessert',
+  },
+  {
+    name: 'Chocolate Lava Cake',
+    description: 'Warm chocolate cake with a molten center, served with vanilla ice cream on the side',
+    price: 8.49,
+    image: '/images/lava-cake.jpg',
+    category: 'Dessert',
+  },
+  {
+    name: 'Fresh Lemonade',
+    description: 'Freshly squeezed lemonade with a hint of mint and a touch of natural sweetness',
+    price: 3.99,
+    image: '/images/lemonade.jpg',
+    category: 'Beverage',
+  },
+  {
+    name: 'Iced Coffee',
+    description: 'Cold brew coffee served over ice with your choice of milk and sweetener options',
+    price: 4.49,
+    image: '/images/iced-coffee.jpg',
+    category: 'Beverage',
+  },
+];
+
+module.exports = { MENU_SEED_DATA };

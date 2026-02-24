@@ -1,0 +1,19 @@
+{
+  "name": "order-management-ms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Order Management feature for a food delivery app",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
+    "test": "npm run test --workspaces",
+    "test:server": "npm run test --workspace=server",
+    "test:client": "npm run test --workspace=client"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
