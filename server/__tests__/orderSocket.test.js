@@ -3,8 +3,7 @@ const { Server } = require('socket.io');
 const ioClient = require('socket.io-client');
 const app = require('../src/app');
 const { setupOrderSocket } = require('../src/socket/orderSocket');
-const { menuStore } = require('../src/store/menuStore');
-const { orderStore } = require('../src/store/orderStore');
+const MenuItem = require('../src/models/MenuItem');
 const request = require('supertest');
 
 let server;
@@ -21,7 +20,7 @@ beforeAll((done) => {
 
   server.listen(PORT, () => {
     const port = server.address().port;
-    clientSocket = ioClient(`http://localhost:${port}`, {
+    clientSocket = ioClient('http://localhost:' + port, {
       transports: ['websocket'],
       forceNew: true,
     });
@@ -35,10 +34,8 @@ afterAll((done) => {
   server.close(done);
 });
 
-beforeEach(() => {
-  menuStore.clear();
-  orderStore.clear();
-  menuStore.create({
+beforeEach(async () => {
+  await MenuItem.create({
     name: 'Test Pizza',
     description: 'A delicious test pizza with all the toppings you can imagine',
     price: 12.99,
@@ -51,7 +48,6 @@ describe('Order Socket.io', () => {
   it('handles order:subscribe and order:unsubscribe', (done) => {
     clientSocket.emit('order:subscribe', { orderId: 'test_order_123' });
 
-    // Small delay to ensure the join completes
     setTimeout(() => {
       clientSocket.emit('order:unsubscribe', { orderId: 'test_order_123' });
       done();
@@ -68,96 +64,70 @@ describe('Order Socket.io', () => {
     clientSocket.emit('order:subscribe', {});
   });
 
-  it('emits order:statusUpdate when status is updated via API', (done) => {
-    const menuItems = menuStore.getAll();
-    const menuItem = menuItems[0];
+  it('emits order:statusUpdate when status is updated via API', async () => {
+    const menuItem = await MenuItem.findOne();
 
-    // Create an order first
-    request(app)
+    const createRes = await request(app)
       .post('/api/orders')
       .send({
         items: [{ menuItemId: menuItem.id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
         customer: { name: 'John Doe', address: '123 Main Street, Springfield', phone: '+1234567890' },
-      })
-      .then((createRes) => {
-        const orderId = createRes.body.order.id;
-
-        // Subscribe to the order room
-        clientSocket.emit('order:subscribe', { orderId });
-
-        // Listen for status update
-        clientSocket.on('order:statusUpdate', (data) => {
-          expect(data.orderId).toBe(orderId);
-          expect(data.status).toBe('preparing');
-          expect(data.updatedAt).toBeDefined();
-          clientSocket.off('order:statusUpdate');
-          done();
-        });
-
-        // Wait for subscription to complete, then update status
-        setTimeout(() => {
-          request(app)
-            .patch(`/api/orders/${orderId}/status`)
-            .send({ status: 'preparing' })
-            .then(() => {});
-        }, 100);
       });
+
+    const orderId = createRes.body.order.id;
+    clientSocket.emit('order:subscribe', { orderId });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const updatePromise = new Promise((resolve) => {
+      clientSocket.on('order:statusUpdate', (data) => {
+        expect(data.orderId).toBe(orderId);
+        expect(data.status).toBe('preparing');
+        expect(data.updatedAt).toBeDefined();
+        clientSocket.off('order:statusUpdate');
+        resolve();
+      });
+    });
+
+    await request(app).patch('/api/orders/' + orderId + '/status').send({ status: 'preparing' });
+    await updatePromise;
   });
 
-  it('only sends update to the subscribed room', (done) => {
-    const menuItems = menuStore.getAll();
-    const menuItem = menuItems[0];
+  it('only sends update to the subscribed room', async () => {
+    const menuItem = await MenuItem.findOne();
 
-    // Create two orders
-    Promise.all([
-      request(app)
-        .post('/api/orders')
-        .send({
-          items: [{ menuItemId: menuItem.id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
-          customer: { name: 'Alice', address: '456 Oak Avenue, Springfield', phone: '+1987654321' },
-        }),
-      request(app)
-        .post('/api/orders')
-        .send({
-          items: [{ menuItemId: menuItem.id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
-          customer: { name: 'Bob', address: '789 Pine Road, Springfield', phone: '+1111111111' },
-        }),
-    ]).then(([res1, res2]) => {
-      const orderId1 = res1.body.order.id;
-      const orderId2 = res2.body.order.id;
+    const [res1, res2] = await Promise.all([
+      request(app).post('/api/orders').send({
+        items: [{ menuItemId: menuItem.id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
+        customer: { name: 'Alice', address: '456 Oak Avenue, Springfield', phone: '+1987654321' },
+      }),
+      request(app).post('/api/orders').send({
+        items: [{ menuItemId: menuItem.id, name: menuItem.name, price: menuItem.price, quantity: 1 }],
+        customer: { name: 'Bob', address: '789 Pine Road, Springfield', phone: '+1111111111' },
+      }),
+    ]);
 
-      // Subscribe only to order 1
-      clientSocket.emit('order:subscribe', { orderId: orderId1 });
+    const orderId1 = res1.body.order.id;
+    const orderId2 = res2.body.order.id;
 
-      let receivedUpdate = false;
+    clientSocket.emit('order:subscribe', { orderId: orderId1 });
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-      clientSocket.on('order:statusUpdate', (data) => {
-        // Should only receive updates for order 1
-        expect(data.orderId).toBe(orderId1);
-        receivedUpdate = true;
-        clientSocket.off('order:statusUpdate');
-      });
-
-      setTimeout(() => {
-        // Update order 2 (should NOT trigger our listener)
-        request(app)
-          .patch(`/api/orders/${orderId2}/status`)
-          .send({ status: 'preparing' })
-          .then(() => {
-            // Update order 1 (should trigger our listener)
-            setTimeout(() => {
-              request(app)
-                .patch(`/api/orders/${orderId1}/status`)
-                .send({ status: 'preparing' })
-                .then(() => {
-                  setTimeout(() => {
-                    expect(receivedUpdate).toBe(true);
-                    done();
-                  }, 100);
-                });
-            }, 100);
-          });
-      }, 100);
+    let receivedUpdate = false;
+    clientSocket.on('order:statusUpdate', (data) => {
+      expect(data.orderId).toBe(orderId1);
+      receivedUpdate = true;
+      clientSocket.off('order:statusUpdate');
     });
+
+    // Update order 2 (should NOT trigger our listener)
+    await request(app).patch('/api/orders/' + orderId2 + '/status').send({ status: 'preparing' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Update order 1 (should trigger our listener)
+    await request(app).patch('/api/orders/' + orderId1 + '/status').send({ status: 'preparing' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(receivedUpdate).toBe(true);
   });
 });

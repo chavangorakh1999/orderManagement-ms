@@ -332,16 +332,26 @@ Tests were written **before** implementation for all API endpoints. The test fil
 
 ## Deployment
 
+> **Important constraint:** The backend **cannot** be deployed to Vercel or any serverless platform.
+> Two reasons:
+>
+> 1. **In-memory store** — serverless functions are stateless and ephemeral; each invocation may be a fresh process, so all stored orders/menu data would be lost between requests.
+> 2. **Socket.io** — requires a persistent, long-lived TCP connection. Serverless functions terminate immediately after returning a response; WebSocket upgrades are not supported.
+>
+> The split is: **frontend → Vercel** (static files only), **backend → Railway/Render/Fly.io** (persistent Node.js process).
+
 ### Frontend → Vercel
 
 1. Connect the GitHub repo to Vercel
 2. Set root directory to `client/`
 3. Add environment variables:
-   - `VITE_API_URL` = your Railway backend URL
-   - `VITE_SOCKET_URL` = your Railway backend URL
+   - `VITE_API_URL` = your Railway backend URL (e.g. `https://fooddash-api.railway.app`)
+   - `VITE_SOCKET_URL` = same Railway backend URL
 4. `vercel.json` is pre-configured to handle SPA routing (404 → `index.html`)
 
 ### Backend → Railway
+
+Railway runs a **persistent Node.js process** — in-memory state and Socket.io both work correctly.
 
 1. Connect the GitHub repo to Railway
 2. Set root directory to `server/`
@@ -354,6 +364,16 @@ Tests were written **before** implementation for all API endpoints. The test fil
 ### Redis → Railway Redis addon
 
 Provision via Railway dashboard → New Service → Redis. Copy the `REDIS_URL` into the server service's environment variables.
+
+### Alternatives to Railway
+
+| Platform | Persistent process | WebSockets | Free tier |
+| -------- | ------------------ | ---------- | --------- |
+| Railway | ✅ | ✅ | ✅ (limited) |
+| Render | ✅ | ✅ | ✅ (spins down on idle) |
+| Fly.io | ✅ | ✅ | ✅ |
+| Vercel | ❌ serverless | ❌ | ✅ — frontend only |
+| Netlify | ❌ serverless | ❌ | ✅ — frontend only |
 
 ---
 

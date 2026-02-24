@@ -9,9 +9,9 @@ const getAllMenuItems = async (req, res, next) => {
   }
 };
 
-const getMenuItemById = (req, res, next) => {
+const getMenuItemById = async (req, res, next) => {
   try {
-    const item = menuService.getMenuItemById(req.params.id);
+    const item = await menuService.getMenuItemById(req.params.id);
     if (!item) {
       return res.status(404).json({
         error: {

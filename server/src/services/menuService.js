@@ -1,4 +1,4 @@
-const { menuStore } = require('../store/menuStore');
+const MenuItem = require('../models/MenuItem');
 const { getRedisClient, getRedisStatus } = require('../config/redis');
 
 const CACHE_KEY = 'menu:all';
@@ -14,7 +14,7 @@ const getAllMenuItems = async () => {
     }
   }
 
-  const items = menuStore.getAll();
+  const items = await MenuItem.find();
 
   if (getRedisStatus()) {
     try {
@@ -27,26 +27,42 @@ const getAllMenuItems = async () => {
   return items;
 };
 
-const getMenuItemById = (id) => {
-  return menuStore.getById(id);
+const getMenuItemById = async (id) => {
+  try {
+    const item = await MenuItem.findById(id);
+    return item || null;
+  } catch (err) {
+    if (err.name === 'CastError') return null;
+    throw err;
+  }
 };
 
 const createMenuItem = async (data) => {
-  const item = menuStore.create(data);
+  const item = await MenuItem.create(data);
   await invalidateCache();
   return item;
 };
 
 const updateMenuItem = async (id, data) => {
-  const item = menuStore.update(id, data);
-  if (item) await invalidateCache();
-  return item;
+  try {
+    const item = await MenuItem.findByIdAndUpdate(id, data, { returnDocument: 'after', runValidators: true });
+    if (item) await invalidateCache();
+    return item || null;
+  } catch (err) {
+    if (err.name === 'CastError') return null;
+    throw err;
+  }
 };
 
 const deleteMenuItem = async (id) => {
-  const result = menuStore.delete(id);
-  if (result) await invalidateCache();
-  return result;
+  try {
+    const item = await MenuItem.findByIdAndDelete(id);
+    if (item) await invalidateCache();
+    return item !== null;
+  } catch (err) {
+    if (err.name === 'CastError') return false;
+    throw err;
+  }
 };
 
 const invalidateCache = async () => {

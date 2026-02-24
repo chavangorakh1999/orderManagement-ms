@@ -1,17 +1,31 @@
-const { orderStore, STATUS_TRANSITIONS } = require('../store/orderStore');
-const { menuStore } = require('../store/menuStore');
+const Order = require('../models/Order');
+const MenuItem = require('../models/MenuItem');
+const { STATUS_TRANSITIONS } = require('../models/Order');
 
-const getAllOrders = () => {
-  return orderStore.getAll();
+const getAllOrders = async () => {
+  return Order.find().sort({ createdAt: -1 });
 };
 
-const getOrderById = (id) => {
-  return orderStore.getById(id);
+const getOrderById = async (id) => {
+  try {
+    const order = await Order.findById(id);
+    return order || null;
+  } catch (err) {
+    if (err.name === 'CastError') return null;
+    throw err;
+  }
 };
 
-const createOrder = (data) => {
+const createOrder = async (data) => {
   for (const item of data.items) {
-    const menuItem = menuStore.getById(item.menuItemId);
+    let menuItem = null;
+    try {
+      menuItem = await MenuItem.findById(item.menuItemId);
+    } catch (err) {
+      if (err.name !== 'CastError') throw err;
+      // CastError means invalid ObjectId format — treat as not found
+    }
+
     if (!menuItem) {
       const error = new Error(`Menu item '${item.menuItemId}' not found`);
       error.status = 400;
@@ -21,29 +35,25 @@ const createOrder = (data) => {
     }
   }
 
-  const totalAmount = data.items.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
+  const totalAmount =
+    Math.round(data.items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
 
-  const roundedTotal = Math.round(totalAmount * 100) / 100;
-
-  return orderStore.create({
+  const order = await Order.create({
     items: data.items,
     customer: data.customer,
-    totalAmount: roundedTotal,
+    totalAmount,
   });
+
+  return order;
 };
 
-const updateOrderStatus = (id, newStatus) => {
-  const order = orderStore.getById(id);
+const updateOrderStatus = async (id, newStatus) => {
+  const order = await getOrderById(id);
   if (!order) return null;
 
   const allowedTransitions = STATUS_TRANSITIONS[order.status];
   if (!allowedTransitions || !allowedTransitions.includes(newStatus)) {
-    const error = new Error(
-      `Cannot transition from '${order.status}' to '${newStatus}'`
-    );
+    const error = new Error(`Cannot transition from '${order.status}' to '${newStatus}'`);
     error.status = 400;
     error.code = 'INVALID_STATUS_TRANSITION';
     error.details = [
@@ -55,7 +65,9 @@ const updateOrderStatus = (id, newStatus) => {
     throw error;
   }
 
-  return orderStore.updateStatus(id, newStatus);
+  order.status = newStatus;
+  await order.save();
+  return order;
 };
 
 module.exports = {

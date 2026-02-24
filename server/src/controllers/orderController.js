@@ -1,18 +1,18 @@
 const orderService = require('../services/orderService');
 const { simulateOrderProgress } = require('../services/orderStatusSimulator');
 
-const getAllOrders = (req, res, next) => {
+const getAllOrders = async (req, res, next) => {
   try {
-    const orders = orderService.getAllOrders();
+    const orders = await orderService.getAllOrders();
     return res.status(200).json({ orders });
   } catch (err) {
     next(err);
   }
 };
 
-const getOrderById = (req, res, next) => {
+const getOrderById = async (req, res, next) => {
   try {
-    const order = orderService.getOrderById(req.params.id);
+    const order = await orderService.getOrderById(req.params.id);
     if (!order) {
       return res.status(404).json({
         error: {
@@ -28,9 +28,9 @@ const getOrderById = (req, res, next) => {
   }
 };
 
-const createOrder = (req, res, next) => {
+const createOrder = async (req, res, next) => {
   try {
-    const order = orderService.createOrder(req.body);
+    const order = await orderService.createOrder(req.body);
     simulateOrderProgress(order.id, req.app.get('io'));
     return res.status(201).json({ order });
   } catch (err) {
@@ -38,9 +38,9 @@ const createOrder = (req, res, next) => {
   }
 };
 
-const updateOrderStatus = (req, res, next) => {
+const updateOrderStatus = async (req, res, next) => {
   try {
-    const order = orderService.updateOrderStatus(req.params.id, req.body.status);
+    const order = await orderService.updateOrderStatus(req.params.id, req.body.status);
     if (!order) {
       return res.status(404).json({
         error: {

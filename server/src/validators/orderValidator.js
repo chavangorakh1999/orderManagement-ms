@@ -1,5 +1,5 @@
 const { z } = require('zod');
-const { ORDER_STATUSES } = require('../store/orderStore');
+const { ORDER_STATUSES } = require('../models/Order');
 
 const orderItemSchema = z.object({
   menuItemId: z.string({ required_error: 'Menu item ID is required' }).min(1),

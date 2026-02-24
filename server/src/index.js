@@ -3,7 +3,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./app');
 const { setupOrderSocket } = require('./socket/orderSocket');
-const { menuStore } = require('./store/menuStore');
+const { connectDB } = require('./config/db');
+const MenuItem = require('./models/MenuItem');
 const { MENU_SEED_DATA } = require('./seed/menuSeed');
 const { connectRedis, getRedisStatus } = require('./config/redis');
 
@@ -11,6 +12,9 @@ const PORT = process.env.PORT || 3001;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 const startServer = async () => {
+  // Connect to MongoDB
+  await connectDB();
+
   const server = http.createServer(app);
 
   const io = new Server(server, {
@@ -41,9 +45,10 @@ const startServer = async () => {
   // Set up Socket.io event handlers
   setupOrderSocket(io);
 
-  // Seed menu data
-  if (menuStore.getAll().length === 0) {
-    MENU_SEED_DATA.forEach((item) => menuStore.create(item));
+  // Seed menu data if collection is empty
+  const count = await MenuItem.countDocuments();
+  if (count === 0) {
+    await MenuItem.insertMany(MENU_SEED_DATA);
     console.log(`[Server] Seeded ${MENU_SEED_DATA.length} menu items`);
   }
 
