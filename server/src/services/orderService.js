@@ -2,8 +2,9 @@ const Order = require('../models/Order');
 const MenuItem = require('../models/MenuItem');
 const { STATUS_TRANSITIONS } = require('../models/Order');
 
-const getAllOrders = async () => {
-  return Order.find().sort({ createdAt: -1 });
+const getAllOrders = async (phone) => {
+  const filter = phone ? { 'customer.phone': phone } : {};
+  return Order.find(filter).sort({ createdAt: -1 });
 };
 
 const getOrderById = async (id) => {

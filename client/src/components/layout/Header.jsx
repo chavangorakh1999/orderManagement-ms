@@ -1,8 +1,34 @@
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../../hooks/useCart';
 
+const getStoredCustomer = () => {
+  try {
+    const raw = localStorage.getItem('lastCustomer');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 const Header = () => {
-  const { itemCount } = useCart();
+  const { itemCount, clearCart } = useCart();
+  const navigate = useNavigate();
+  const [customer, setCustomer] = useState(getStoredCustomer);
+
+  // Sync when another tab checks out or logs out
+  useEffect(() => {
+    const onStorage = () => setCustomer(getStoredCustomer());
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('lastCustomer');
+    clearCart();
+    setCustomer(null);
+    navigate('/');
+  };
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -37,6 +63,20 @@ const Header = () => {
                 </span>
               )}
             </Link>
+
+            {customer ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-gray-700 hidden sm:block">
+                  Hi, {customer.name.split(' ')[0]}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="text-sm text-red-500 hover:text-red-700 font-medium transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : null}
           </nav>
         </div>
       </div>
