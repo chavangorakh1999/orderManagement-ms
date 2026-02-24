@@ -124,6 +124,8 @@ orderManagement-ms/
 │   │   └── utils/            # formatters (INR currency), validators
 │   └── __tests__/            # Component + utility tests (35 tests)
 └── server/                   # Express API server
+    ├── ecosystem.config.js   # PM2 cluster config (instances=max, env_production)
+    ├── Procfile              # Railway/Render: pm2-runtime start ecosystem.config.js
     ├── src/
     │   ├── app.js            # Express app (importable without starting HTTP)
     │   ├── index.js          # HTTP server + Socket.io + DB connect + seeding (entry point)
@@ -190,7 +192,25 @@ For this scope, `useReducer` + Context provides the same predictable state updat
 ### 8. Zod Validation (Middleware Factory)
 A single `validate(schema)` middleware factory wraps all endpoints. It parses `req.body` against a Zod schema and returns a structured `400 VALIDATION_ERROR` response with per-field details before the request reaches the controller.
 
-### 9. Redis Graceful Fallback
+### 9. PM2 Cluster Mode
+
+The server runs under PM2 (`pm2-runtime`) in `cluster` exec mode with `instances: 'max'`, spawning one worker per CPU core. `pm2-runtime` keeps the process in the foreground (required for PaaS platforms like Railway). The Socket.io Redis adapter ensures events are broadcast across all workers.
+
+```bash
+# Production (from repo root)
+npm run start:prod --workspace=server
+
+# Local process management (ecosystem.config.js lives in server/)
+cd server
+npx pm2 start ecosystem.config.js --env development
+npx pm2 logs fooddash-api
+npx pm2 monit                  # real-time terminal dashboard (CPU, memory, logs)
+npx pm2 restart fooddash-api
+npx pm2 delete fooddash-api
+```
+
+### 10. Redis Graceful Fallback
+
 Both Redis caching (menu) and rate limiting fall back to in-memory equivalents when Redis is unavailable. The server starts and functions correctly without Redis — it just loses cache and distributed rate limiting.
 
 ---
@@ -366,16 +386,16 @@ Tests were written **before** implementation for all API endpoints. The test fil
 
 ### Backend → Railway
 
-Railway runs a **persistent Node.js process** — MongoDB, Socket.io, and the status simulator all work correctly.
+Railway runs a **persistent Node.js process** — MongoDB, Socket.io, and the status simulator all work correctly. The server uses **PM2** in cluster mode to utilise all available CPU cores and automatically restart on crashes.
 
 1. Connect the GitHub repo to Railway
 2. Set root directory to `server/`
 3. Add environment variables:
    - `CORS_ORIGIN` = your Vercel frontend URL
    - `MONGODB_URI` = provisioned MongoDB URL (Railway MongoDB addon or MongoDB Atlas)
-   - `REDIS_URL` = provisioned Redis URL (Railway Redis addon — optional)
+   - `REDIS_URL` = provisioned Redis URL (Railway Redis addon — **required** for PM2 cluster mode so Socket.io events are shared across workers)
    - `STATUS_UPDATE_INTERVAL_MS` = `5000` (or your preferred interval)
-4. `Procfile` is pre-configured: `web: node src/index.js`
+4. `Procfile` is pre-configured: `web: pm2-runtime start ecosystem.config.js --env production`
 
 ### MongoDB → Railway MongoDB addon or Atlas
 
