@@ -367,49 +367,97 @@ Tests were written **before** implementation for all API endpoints. The test fil
 
 ## Deployment
 
-> **Important constraint:** The backend **cannot** be deployed to Vercel or any serverless platform.
-> Two reasons:
->
-> 1. **Socket.io** — requires a persistent, long-lived TCP connection. Serverless functions terminate immediately after returning a response; WebSocket upgrades are not supported.
-> 2. **Status simulator** — runs `setTimeout` chains in the background; serverless functions have no persistent process to run them.
->
-> The split is: **frontend → Vercel** (static files only), **backend → Railway/Render/Fly.io** (persistent Node.js process).
+Both frontend and backend are deployed on **AWS EC2**. Nginx sits in front of the React build, serving static assets and proxying `/api` and `/socket.io` to the Express server running on port 3001 — so the browser only ever talks to port 80 on a single host with no CORS.
 
-### Frontend → Vercel
+```text
+Browser → EC2 :80 (Nginx)
+                 ├── /assets/*    → dist/ (static, immutable cache)
+                 ├── /api/*       → localhost:3001 (Express)
+                 ├── /socket.io/* → localhost:3001 (Socket.io, WS upgrade)
+                 └── /*           → dist/index.html (SPA fallback)
+```
 
-1. Connect the GitHub repo to Vercel
-2. Set root directory to `client/`
-3. Add environment variables:
-   - `VITE_API_URL` = your Railway backend URL (e.g. `https://fooddash-api.railway.app`)
-   - `VITE_SOCKET_URL` = same Railway backend URL
-4. `vercel.json` is pre-configured to handle SPA routing (404 → `index.html`)
+### Prerequisites (on the EC2 instance)
 
-### Backend → Railway
+```bash
+sudo apt update && sudo apt install -y nginx nodejs npm
+sudo npm install -g pm2
+```
 
-Railway runs a **persistent Node.js process** — MongoDB, Socket.io, and the status simulator all work correctly. The server uses **PM2** in cluster mode to utilise all available CPU cores and automatically restart on crashes.
+### 1. Clone and install
 
-1. Connect the GitHub repo to Railway
-2. Set root directory to `server/`
-3. Add environment variables:
-   - `CORS_ORIGIN` = your Vercel frontend URL
-   - `MONGODB_URI` = provisioned MongoDB URL (Railway MongoDB addon or MongoDB Atlas)
-   - `REDIS_URL` = provisioned Redis URL (Railway Redis addon — **required** for PM2 cluster mode so Socket.io events are shared across workers)
-   - `STATUS_UPDATE_INTERVAL_MS` = `5000` (or your preferred interval)
-4. `Procfile` is pre-configured: `web: pm2-runtime start ecosystem.config.js --env production`
+```bash
+git clone https://github.com/your-username/orderManagement-ms.git
+cd orderManagement-ms
+npm install
+```
 
-### MongoDB → Railway MongoDB addon or Atlas
+### 2. Configure server environment
 
-Provision via Railway dashboard → New Service → MongoDB, or use a free [MongoDB Atlas](https://www.mongodb.com/atlas) cluster. Copy the connection string as `MONGODB_URI`.
+```bash
+cp server/.env.example server/.env
+# Set MONGODB_URI, REDIS_URL, CORS_ORIGIN, STATUS_UPDATE_INTERVAL_MS
+nano server/.env
+```
 
-### Alternatives to Railway
+### 3. Build the frontend
 
-| Platform | Persistent process | WebSockets | Free tier |
-| -------- | ------------------ | ---------- | --------- |
-| Railway | ✅ | ✅ | ✅ (limited) |
-| Render | ✅ | ✅ | ✅ (spins down on idle) |
-| Fly.io | ✅ | ✅ | ✅ |
-| Vercel | ❌ serverless | ❌ | ✅ — frontend only |
-| Netlify | ❌ serverless | ❌ | ✅ — frontend only |
+```bash
+# client/.env already has VITE_API_URL="" and VITE_SOCKET_URL=""
+# so Nginx proxying handles routing — no hardcoded IP needed
+npm run build --workspace=client
+```
+
+### 4. Copy build to Nginx web root
+
+```bash
+sudo mkdir -p /var/www/fooddash
+sudo cp -r client/dist /var/www/fooddash/dist
+```
+
+### 5. Install Nginx config and reload
+
+```bash
+sudo cp client/nginx.conf /etc/nginx/sites-available/fooddash
+sudo ln -s /etc/nginx/sites-available/fooddash /etc/nginx/sites-enabled/fooddash
+sudo rm -f /etc/nginx/sites-enabled/default   # remove default site
+sudo nginx -t                                  # verify config
+sudo systemctl reload nginx
+```
+
+### 6. Start the backend with PM2
+
+```bash
+cd server
+pm2 start ecosystem.config.js --env production
+pm2 save           # persist across reboots
+pm2 startup        # generate systemd unit (follow the printed command)
+```
+
+### 7. Open EC2 security group ports
+
+| Port | Protocol | Purpose                       |
+| ---- | -------- | ----------------------------- |
+| 22   | TCP      | SSH                           |
+| 80   | TCP      | HTTP (Nginx)                  |
+| 443  | TCP      | HTTPS (if adding TLS later)   |
+
+Port 3001 does **not** need to be public — Nginx proxies to it internally.
+
+### Redeploying after code changes
+
+```bash
+# Pull latest
+git pull
+
+# Rebuild frontend and refresh web root
+npm run build --workspace=client
+sudo rm -rf /var/www/fooddash/dist
+sudo cp -r client/dist /var/www/fooddash/dist
+
+# Restart backend
+cd server && pm2 restart fooddash-api
+```
 
 ---
 
