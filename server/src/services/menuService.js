@@ -28,13 +28,7 @@ const getAllMenuItems = async () => {
 };
 
 const getMenuItemById = async (id) => {
-  try {
-    const item = await MenuItem.findById(id);
-    return item || null;
-  } catch (err) {
-    if (err.name === 'CastError') return null;
-    throw err;
-  }
+  return MenuItem.findOne({ id }) || null;
 };
 
 const createMenuItem = async (data) => {
@@ -44,25 +38,18 @@ const createMenuItem = async (data) => {
 };
 
 const updateMenuItem = async (id, data) => {
-  try {
-    const item = await MenuItem.findByIdAndUpdate(id, data, { returnDocument: 'after', runValidators: true });
-    if (item) await invalidateCache();
-    return item || null;
-  } catch (err) {
-    if (err.name === 'CastError') return null;
-    throw err;
-  }
+  const item = await MenuItem.findOneAndUpdate({ id }, data, {
+    returnDocument: 'after',
+    runValidators: true,
+  });
+  if (item) await invalidateCache();
+  return item || null;
 };
 
 const deleteMenuItem = async (id) => {
-  try {
-    const item = await MenuItem.findByIdAndDelete(id);
-    if (item) await invalidateCache();
-    return item !== null;
-  } catch (err) {
-    if (err.name === 'CastError') return false;
-    throw err;
-  }
+  const item = await MenuItem.findOneAndDelete({ id });
+  if (item) await invalidateCache();
+  return item !== null;
 };
 
 const invalidateCache = async () => {

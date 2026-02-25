@@ -9,25 +9,12 @@ const getAllOrders = async (phone) => {
 };
 
 const getOrderById = async (id) => {
-  try {
-    const order = await Order.findById(id);
-    return order || null;
-  } catch (err) {
-    if (err.name === 'CastError') return null;
-    throw err;
-  }
+  return Order.findOne({ id }) || null;
 };
 
 const createOrder = async (data) => {
   for (const item of data.items) {
-    let menuItem = null;
-    try {
-      menuItem = await MenuItem.findById(item.menuItemId);
-    } catch (err) {
-      if (err.name !== 'CastError') throw err;
-      // CastError means invalid ObjectId format — treat as not found
-    }
-
+    const menuItem = await MenuItem.findOne({ id: item.menuItemId });
     if (!menuItem) {
       const error = new Error(`Menu item '${item.menuItemId}' not found`);
       error.status = 400;
@@ -45,7 +32,7 @@ const createOrder = async (data) => {
   const order = await Order.create({
     items: data.items,
     customer: data.customer,
-    customerId: customer._id,
+    customerId: customer.id,
     totalAmount,
   });
 

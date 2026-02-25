@@ -115,7 +115,7 @@ describe('Menu API', () => {
       const res = await request(app).delete('/api/menu/' + created.id);
       expect(res.status).toBe(200);
       expect(res.body.message).toBeDefined();
-      expect(await MenuItem.findById(created.id)).toBeNull();
+      expect(await MenuItem.findOne({ id: created.id })).toBeNull();
     });
 
     it('returns 404 for non-existent ID', async () => {

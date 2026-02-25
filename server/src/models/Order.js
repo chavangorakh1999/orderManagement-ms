@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { generateOrderId } = require('../utils/generateId');
 
 const ORDER_STATUSES = {
   RECEIVED: 'received',
@@ -35,9 +36,10 @@ const customerSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
+    id: { type: String, unique: true, default: generateOrderId },
     items: [orderItemSchema],
     customer: customerSchema,
-    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+    customerId: { type: String, ref: 'Customer' },
     status: {
       type: String,
       enum: Object.values(ORDER_STATUSES),
@@ -46,11 +48,10 @@ const orderSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true },
   },
   {
+    id: false,
     timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
     toJSON: {
-      virtuals: true,
-      transform(doc, ret) {
-        ret.id = ret._id.toString();
+      transform(_doc, ret) {
         delete ret._id;
         delete ret.__v;
         return ret;
