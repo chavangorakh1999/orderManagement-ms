@@ -6,7 +6,7 @@ const MenuItem = ({ item }) => {
   const quantity = getItemQuantity(item.id);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow flex flex-col">
       <div className="h-48 bg-gray-100 flex items-center justify-center overflow-hidden">
         <img
           src={item.image}
@@ -19,7 +19,7 @@ const MenuItem = ({ item }) => {
         />
       </div>
 
-      <div className="p-4">
+      <div className="p-4 flex flex-col flex-1">
         <div className="flex items-start justify-between mb-1">
           <h3 className="font-semibold text-gray-900 text-lg">{item.name}</h3>
           <span className="text-orange-600 font-bold text-lg ml-2 shrink-0">
@@ -27,11 +27,11 @@ const MenuItem = ({ item }) => {
           </span>
         </div>
 
-        <span className="inline-block text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2 py-0.5 mb-2">
+        <span className="w-fit inline-block text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2 py-0.5 mb-2">
           {item.category}
         </span>
 
-        <p className="text-gray-500 text-sm mb-4 line-clamp-2">{item.description}</p>
+        <p className="text-gray-500 text-sm mb-4 line-clamp-2 flex-1">{item.description}</p>
 
         {quantity === 0 ? (
           <button
