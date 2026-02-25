@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const MenuItem = require('../models/MenuItem');
 const { STATUS_TRANSITIONS } = require('../models/Order');
+const { findOrCreateCustomer } = require('./customerService');
 
 const getAllOrders = async (phone) => {
   const filter = phone ? { 'customer.phone': phone } : {};
@@ -39,9 +40,12 @@ const createOrder = async (data) => {
   const totalAmount =
     Math.round(data.items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
 
+  const customer = await findOrCreateCustomer(data.customer);
+
   const order = await Order.create({
     items: data.items,
     customer: data.customer,
+    customerId: customer._id,
     totalAmount,
   });
 

@@ -89,6 +89,18 @@ describe('Order API', () => {
       expect(res.status).toBe(400);
       expect(res.body.error.code).toBe('INVALID_MENU_ITEM');
     });
+
+    it('includes customerId in created order', async () => {
+      const res = await request(app).post('/api/orders').send(createValidOrder());
+      expect(res.status).toBe(201);
+      expect(res.body.order.customerId).toBeDefined();
+    });
+
+    it('reuses the same customer for the same phone number', async () => {
+      const res1 = await request(app).post('/api/orders').send(createValidOrder());
+      const res2 = await request(app).post('/api/orders').send(createValidOrder());
+      expect(res1.body.order.customerId).toBe(res2.body.order.customerId);
+    });
   });
 
   describe('GET /api/orders/:id', () => {

@@ -2,7 +2,7 @@
 
 A full-stack Order Management feature for a food delivery application, built as a Senior Full Stack Developer assessment.
 
-**Live Demo:** `https://your-app.vercel.app` *(replace after deployment)*
+**Live Demo:** `http://13.203.26.0` *(replace after deployment)*
 **Loom Walkthrough:** `https://loom.com/your-video` *(replace after recording)*
 
 ---
@@ -66,7 +66,8 @@ FoodDash allows users to:
     │    MongoDB       │         │       Redis          │
     │ • Orders         │         │ • Socket.io adapter  │
     │ • Menu items     │         │ • Menu cache (60s)   │
-    └─────────────────┘         └─────────────────────┘
+    │ • Customers      │         └─────────────────────┘
+    └─────────────────┘
 ```
 
 ### Layered Backend Architecture
@@ -135,11 +136,12 @@ orderManagement-ms/
     │   ├── controllers/      # Thin HTTP handlers
     │   ├── middleware/       # validate (Zod), errorHandler, rateLimiter
     │   ├── models/
+    │   │   ├── Customer.js   # Mongoose schema — name, phone (unique), address
     │   │   ├── MenuItem.js   # Mongoose schema + id virtual
-    │   │   └── Order.js      # Mongoose schema + STATUS_TRANSITIONS + ORDER_STATUSES
+    │   │   └── Order.js      # Mongoose schema + STATUS_TRANSITIONS + ORDER_STATUSES + customerId ref
     │   ├── routes/           # menuRoutes, orderRoutes
     │   ├── seed/             # 12 menu items across 8 categories
-    │   ├── services/         # Business logic + orderStatusSimulator
+    │   ├── services/         # Business logic + customerService + orderStatusSimulator
     │   ├── socket/           # orderSocket (room-per-order pattern)
     │   ├── utils/            # generateId (nanoid)
     │   └── validators/       # Zod schemas for menu and orders
@@ -209,7 +211,22 @@ npx pm2 restart fooddash-api
 npx pm2 delete fooddash-api
 ```
 
-### 10. Redis Graceful Fallback
+### 10. Customer Find-or-Create
+
+When an order is placed, `customerService.findOrCreateCustomer()` performs a single `findOneAndUpdate` with `upsert: true` keyed on `phone`. This atomically creates the customer if they don't exist, or updates their `name` and `address` to the latest values if they do. The resulting `customer._id` is stored on the order as a `customerId` reference.
+
+The embedded `customer` subdocument is intentionally kept on the order to preserve the exact name and address *at the time the order was placed* — the normalized ref enables future features like order history by customer ID and customer profile management.
+
+```js
+// One atomic operation — no separate read + write
+Customer.findOneAndUpdate(
+  { phone },
+  { $set: { name, address } },
+  { upsert: true, returnDocument: 'after' }
+);
+```
+
+### 11. Redis Graceful Fallback
 
 Both Redis caching (menu) and rate limiting fall back to in-memory equivalents when Redis is unavailable. The server starts and functions correctly without Redis — it just loses cache and distributed rate limiting.
 
@@ -234,7 +251,7 @@ Both Redis caching (menu) and rate limiting fall back to in-memory equivalents w
 | `GET` | `/api/orders` | List all orders — `200 { orders: [] }` when empty |
 | `GET` | `/api/orders?phone=<phone>` | Filter orders by customer phone number |
 | `GET` | `/api/orders/:id` | Get single order — `404` if not found |
-| `POST` | `/api/orders` | Place order (validates items exist, calculates total server-side) |
+| `POST` | `/api/orders` | Place order — creates/upserts customer by phone, validates items, calculates total server-side |
 | `PATCH` | `/api/orders/:id/status` | Advance status (enforces transition rules) |
 
 ### Health
@@ -350,14 +367,14 @@ npm run test:client               # client tests only
 | Suite | Tests | Coverage |
 |-------|-------|---------|
 | `server/__tests__/menu.test.js` | 15 | Full CRUD + validation + 404 |
-| `server/__tests__/order.test.js` | 15 | Lifecycle, server-side total, transition enforcement |
+| `server/__tests__/order.test.js` | 17 | Lifecycle, server-side total, transition enforcement, customer ref |
 | `server/__tests__/orderSocket.test.js` | 4 | Subscribe/unsubscribe, event emission, room isolation |
 | `client/__tests__/utils/validators.test.js` | 13 | All validator functions |
 | `client/__tests__/components/MenuItem.test.jsx` | 5 | Render, add to cart, quantity stepper |
 | `client/__tests__/components/Cart.test.jsx` | 3 | Empty state, items, item count |
 | `client/__tests__/components/CheckoutForm.test.jsx` | 9 | Fields, blur validation, submit behaviour |
 | `client/__tests__/components/OrderStatusTracker.test.jsx` | 5 | All status states including delivered = completed |
-| **Total** | **69** | |
+| **Total** | **71** | |
 
 ### TDD Approach
 
@@ -472,7 +489,7 @@ cd server && pm2 restart fooddash-api
 ### 2. Code Quality
 
 - **Layered architecture**: Route → Controller → Service → Model (each layer has one responsibility)
-- **69 tests** passing across server and client
+- **71 tests** passing across server and client
 - TDD: tests written before implementation for all API endpoints
 - Zod schemas shared between validation middleware and type inference
 - Pure functions throughout (reducers, validators, formatters)
@@ -501,6 +518,7 @@ cd server && pm2 restart fooddash-api
 - **Health endpoint**: `/health` for platform health checks
 - **404 vs 200**: List endpoints always return `200` with empty array; `404` reserved for missing single entities
 - **Phone-based order lookup**: `GET /api/orders?phone=<phone>` returns orders belonging to a specific customer
+- **Customer normalization**: `POST /api/orders` atomically finds or creates a `Customer` document by phone (upsert), stores the `customerId` ref on the order — same customer is never duplicated
 
 ### 5. Use of AI
 
@@ -527,7 +545,7 @@ Claude Code (Claude Sonnet 4.6) was used as a **pair-programming collaborator** 
 - Diagnosed the shared object mutation bug in order tests (`customer: validCustomer` reference vs `{ ...validCustomer }` spread) — caught by methodically running tests in isolation
 - Identified the `setupFilesAfterSetup` → `setupFilesAfterEnv` typo in Jest config
 - Fixed the React "Cannot update during render" error in CheckoutPage (`navigate()` inside render → moved to `useEffect`)
-- Identified that `dotenv` was not being loaded — `STATUS_UPDATE_INTERVAL_MS` was always `undefined`
+
 
 **Testing**
 - Wrote all 69 tests following TDD discipline (tests before implementation)

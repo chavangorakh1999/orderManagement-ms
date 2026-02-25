@@ -37,6 +37,7 @@ const orderSchema = new mongoose.Schema(
   {
     items: [orderItemSchema],
     customer: customerSchema,
+    customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
     status: {
       type: String,
       enum: Object.values(ORDER_STATUSES),
